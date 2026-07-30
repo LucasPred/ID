@@ -5,9 +5,14 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# Inicializar el cliente de Gemini de forma segura
-api_key = os.environ.get("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key) if api_key else None
+# Inicialización segura del cliente con manejo de excepciones
+client = None
+try:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        client = genai.Client(api_key=api_key)
+except Exception as e:
+    print(f"Advertencia al inicializar el cliente de Gemini: {e}")
 
 HTML_CONTENT = """<!DOCTYPE html>
 <html lang="es">
@@ -121,7 +126,7 @@ def analizar_material():
         if not client:
             return jsonify({
                 "status": "error", 
-                "message": "La API Key de Gemini no está configurada en las variables de entorno de Render."
+                "message": "La API Key de Gemini no está configurada o el cliente no se pudo inicializar."
             }), 500
 
         modulo_fineza = request.form.get('modulo_fineza', 'No especificado')
