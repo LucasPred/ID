@@ -2,18 +2,16 @@ import os
 from flask import Flask, render_template, request, jsonify
 from google import genai
 from google.genai import types
-from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
+# Forzar la ruta absoluta de la carpeta templates y de la aplicación
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 
-# Configuración y validación robusta de la clave de API
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
-if not api_key:
-    raise ValueError("No se encontró la clave de API de Gemini en las variables de entorno de Render.")
-
-# Inicializar el cliente oficial de Gemini
-client = genai.Client(api_key=api_key)
+# Inicializar el cliente de Gemini de forma segura
+api_key = os.environ.get("GEMINI_API_KEY")
+client = genai.Client(api_key=api_key) if api_key else None
 
 @app.route('/')
 def index():
@@ -22,53 +20,62 @@ def index():
 @app.route('/analizar_material', methods=['POST'])
 def analizar_material():
     try:
-        # Recopilar parámetros técnicos de entrada del formulario
+        if not client:
+            return jsonify({
+                "status": "error", 
+                "message": "La API Key de Gemini no está configurada en las variables de entorno de Render."
+            }), 500
+
+        # Recoger parámetros del formulario HTML
         modulo_fineza = request.form.get('modulo_fineza', 'No especificado')
         coef_uniformidad = request.form.get('coef_uniformidad', 'No especificado')
         coef_curvatura = request.form.get('coef_curvatura', 'No especificado')
-        tipo_proceso = request.form.get('tipo_proceso', 'Arena / Grava Estándar')
-
-        prompt_sistema = f"""
-        Actúa como un experto geólogo senior e ingeniero metalúrgico especialista en procesamiento de áridos, 
-        extracción de arenas fluviales y plantas de clasificación industrial (zarandas Tecmaq, hornos rotativos de secado).
+        tipo_proceso = request.form.get('tipo_proceso', 'Arena Industrial')
         
-        Analiza los siguientes datos de entrada del material:
-        - Módulo de Fineza (MF): {modulo_fineza}
-        - Coeficiente de Uniformidad (Cu): {coef_uniformidad}
-        - Coeficiente de Curvatura (Cc): {coef_curvatura}
-        - Aplicación / Destino: {tipo_proceso}
+        imagen = request.files.get('imagen_material')
 
-        Genera un informe técnico exhaustivo, preciso y de nivel industrial que incluya:
-        1. Criterios técnicos, químicos y organolépticos del material.
-        2. Cuadro simulador de ensayo por mallas (ASTM C136) detallando tamaño de apertura, % retenido parcial, % retenido acumulado y % pasante acumulado con alta precisión matemática.
-        3. Comportamiento en zarandas rectangulares tipo Tecmaq (eficiencia de separación, inclinación recomendada, amplitud y frecuencia de vibración).
-        4. Fundamento técnico y variables críticas para el proceso de secado (temperatura de ingreso/egreso en secador rotativo, control de humedad residual para arenas especiales).
-        """
+        # Construir el prompt técnico experto
+        prompt_text = (
+            f"Actúa como un ingeniero metalúrgico y geólogo experto en procesamiento de áridos, "
+            f"operando para el sector industrial (como GRAVAFILT S.A. y aplicaciones en Vaca Muerta). "
+            f"Analiza los siguientes parámetros geotécnicos proporcionados:\n"
+            f"- Módulo de Fineza (MF): {modulo_fineza}\n"
+            f"- Coeficiente de Uniformidad (Cu): {coef_uniformidad}\n"
+            f"- Coeficiente de Curvatura (Cc): {coef_curvatura}\n"
+            f"- Destino / Producto: {tipo_proceso}\n\n"
+            f"Genera un informe técnico riguroso que incluya:\n"
+            f"1. Evaluación del comportamiento granulométrico y su idoneidad para el destino indicado.\n"
+            f"2. Simulación estimada de rendimiento en zarandas industriales y control de humedad/secado.\n"
+            f"3. Recomendaciones de optimización operativa para la planta."
+        )
 
-        contents = [prompt_sistema]
+        contents = [prompt_text]
 
-        # Procesar imagen si el usuario la adjuntó de forma segura
-        if 'imagen_material' in request.files:
-            archivo = request.files['imagen_material']
-            if archivo and archivo.filename != '':
-                file_bytes = archivo.read()
-                contents.append(
-                    types.Part.from_bytes(
-                        data=file_bytes,
-                        mime_type=archivo.content_type or 'image/jpeg'
-                    )
+        if imagen and imagen.filename != '':
+            image_bytes = imagen.read()
+            mime_type = imagen.mimetype or 'image/jpeg'
+            contents.append(
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=mime_type
                 )
+            )
 
-        # Llamada al modelo Gemini 2.5 Flash para procesamiento rápido y técnico
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=contents
         )
 
-        return jsonify({"status": "success", "analisis": response.text})
+        return jsonify({
+            "status": "success",
+            "analisis": response.text
+        })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
